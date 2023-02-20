@@ -1,4 +1,4 @@
-    #import sys
+#import sys
 from mpi4py import MPI
 from os import remove
 #import matplotlib
@@ -108,8 +108,48 @@ def put_rho_boundaries_new(rho_left,rho_right):  # Has problems
         f[0:na,0:nz,x+1] = rho_right * w[0:na]
 
 #-------------------------------------------------------------------------------
+# Initialization: put velocity and density from the master node to all processors
+# this routine also initializes f in every node
+#-------------------------------------------------------------------------------
+
+def put_rho_u():
+    if rank == 0:
+        for r in np.arange(1,size): #iterate through the nodes
+            x0=(r-1)*nxi #memory chunk
+
+            # send densities to all nodes
+            tmpRho = np.zeros((nz,mx[r]))
+            tmpRho = RHO[0:nz,x0:x0+mx[r]]
+            comm.send(tmpRho,dest=r)
+
+            # send velocities to all nodes
+            tmpU = np.zeros((nz,mx[r]))
+            for d in np.arange(D):
+                tmpU = U[d][0:nz,x0:x0+mx[r]]
+                comm.send(tmpU,dest=r)
+                
+    if rank > 0 and rank < nr:
+        # receive densities at the node "rank"
+        tmpRho = comm.recv(source=0)
+        rho[0:nz,1:mx[rank]+1]=tmpRho
+
+        # receive velocities at the node "rank"
+        for d in np.arange(D):
+            tmpU = comm.recv(source=0)
+            u[d][0:nz,1:mx[rank]+1]=tmpU
+
+        # initialize the distribution function f
+        u2 = np.einsum('ijk,ijk->jk', u, u)
+        for a in np.arange(na):
+            f[a] = rho * w[a] * c1
+            cu = np.einsum('i,ijk->jk', c[a], u)
+            for d in np.arange(D):
+                f[a] += w[a]*(c2*c[a][d]*u[d] + c3*cu**2 + c4*u2)
+   
+#-------------------------------------------------------------------------------
 # Put velocity from the master node to all processors and initialize f
 #-------------------------------------------------------------------------------
+
 
 def put_u():
     if rank == 0:
@@ -138,7 +178,7 @@ def put_u():
 
 def put_rho():
     if rank == 0:
-        tmp = np.zeros(nz)
+#        tmp = np.zeros(nz)
         for r in range(1,size):
             tmp = np.zeros((nz,mx[r]))
             x0=(r-1)*nxi
@@ -262,19 +302,19 @@ else:      time_loops = 1
 normal         = 0
 gabrieleNoBC   = 4
 gabrieleWithBC = 5
-stream_opt     = normal
-#stream_opt     = gabrieleWithBC
+#stream_opt     = normal
+stream_opt     = gabrieleWithBC
 
 plots  = 0
 files  = 1
 none   = 2
 output = plots        # Choose the output type
 
-nt   =  200          # Number of time steps
-nx   =   201          # X-axis size
-nz   =   201          # Z-axis size
-Inc  =   10          # Increment between output
-Tinc =   10          # Increment between prints
+nt   =  2000          # Number of time steps
+nx   =   1001          # X-axis size
+nz   =   401          # Z-axis size
+Inc  =   25          # Increment between output
+Tinc =   25          # Increment between prints
 
 # Plot options
 
@@ -294,7 +334,7 @@ clip_U   = 0.25 ; gpow_U   = 0.1
 
 File          = 2
 point_source  = False     # Point source input
-random_model  = File      # Random grain model input
+random_model  = True      # Random grain model input
 void_grains   = False     # Add void grains
 fill_line     = random_model # Fill lines that are one unit wide
 grain_density = 0.9       # Grain density
@@ -479,8 +519,9 @@ if rank == 0:
 # Initialize the density, velocity and solid boolean on the slave nodes
 
 f[0:na] = 1
-put_rho()
-put_u()
+put_rho_u()
+#put_rho()
+#put_u()
 put_solid()
 for a in np.arange(na):
     for z in np.arange(nz):
